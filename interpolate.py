@@ -63,19 +63,18 @@ def split_line(row):
 
 
 # Load the data, convert to target projection for shapely, then interpolate points
-def load_roads_from_file():
+def process_roads(df):
     if os.path.exists('/cache/final.pickle') and USE_CACHE:
         return pd.read_pickle('/cache/final.pickle')
 
-    if os.path.exists('/cache/ref.pickle'):
+    if os.path.exists('/cache/road.pickle'):
         print('loading roads from pickle')
-        df = pd.read_pickle('/cache/ref.pickle')
+        df = pd.read_pickle('/cache/road.pickle')
     else:
         start = time.process_time()
-        df = geopandas.read_file('/data/ref/ref.shp')
         df = df.to_crs('EPSG:4326')
         df = df.set_index('ROADSEGID')
-        df.to_pickle('/cache/ref.pickle')
+        df.to_pickle('/cache/road.pickle')
         print('loaded shapefile in {} seconds'.format(time.process_time() - start))
 
     if USE_SUBSET:
@@ -85,29 +84,22 @@ def load_roads_from_file():
     total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
     print('total points: {}'.format(total_points_count))
 
-    if os.path.exists(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle') and USE_CACHE:
-        print(f'loading EPSG:{TARGET_PROJ_EPSG_CODE} roads from pickle')
-        df = pd.read_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle')
-    else:
-        start = time.process_time()
-        df = df.to_crs(TARGET_PROJ_EPSG_CODE)
-        df.to_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle')
-        print('converted to EPSG:{} in {} seconds'.format(TARGET_PROJ_EPSG_CODE, time.process_time() - start))
+    df = df.to_crs(TARGET_PROJ_EPSG_CODE)
 
     # remove roads that are too short and show how many were removed
     orig_len = df.shape[0]
-    df = df[df['geometry'].apply(lambda x: x.length) > MIN_LINE_LENGTH]
+    tqdm.pandas(desc='filtering short roads')
+    df = df[df['geometry'].progress_apply(lambda x: x.length) > MIN_LINE_LENGTH]
     print('removed {} roads that were too short'.format(orig_len - df.shape[0]))
 
     # make points every INTERPOLATION_DISTANCE meters evenly along the line
-    if os.path.exists(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle') and USE_CACHE:
+    if os.path.exists(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle') and USE_CACHE:
         print(f'loading split EPSG:{TARGET_PROJ_EPSG_CODE} roads from pickle')
-        df = pd.read_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle')
+        df = pd.read_pickle(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle')
     else:
-        start = time.process_time()
+        tqdm.pandas(desc='splitting lines')
         df['geometry'] = df.progress_apply(lambda row: split_line(row), axis=1)
-        df.to_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle')
-        print('interpolated points in {} seconds'.format(time.process_time() - start))
+        df.to_pickle(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle')
 
     total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
     print('total points: {}'.format(total_points_count))
@@ -116,8 +108,8 @@ def load_roads_from_file():
     df = df.to_crs('EPSG:4326')
 
     # write to shapefile
-    if WRITE_DEBUG_SHAPEFILES:
-        df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('/data/interpolated/shp.shp')
+    # if WRITE_DEBUG_SHAPEFILES:
+    #     df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('/data/interpolated/shp.shp')
 
     points_dict = {}
     for index, row in tqdm(df.iterrows(), total=df.shape[0]):
@@ -128,9 +120,9 @@ def load_roads_from_file():
                 points_dict[point] = []
             points_dict[point].append(index)
 
-    if WRITE_DEBUG_SHAPEFILES:
-        all_points = gpd.GeoDataFrame({'geometry': [Point(x) for x in points_dict.keys()]})
-        all_points.to_file('/data/interpolated_points/shp.shp')
+    # if WRITE_DEBUG_SHAPEFILES:
+    #     all_points = gpd.GeoDataFrame({'geometry': [Point(x) for x in points_dict.keys()]})
+    #     all_points.to_file('/data/interpolated_points/shp.shp')
 
     # get just points that have multiple ids
     dup_points_dict = {k: v for k, v in points_dict.items() if len(v) > 1}
@@ -146,8 +138,8 @@ def load_roads_from_file():
     #     else:
     #         df.at[index, 'geometry'] = LineString(coords)
     # write to shapefile
-    if WRITE_DEBUG_SHAPEFILES:
-        df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('/data/split_no_dup/shp.shp')
+    # if WRITE_DEBUG_SHAPEFILES:
+        # df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('/data/split_no_dup/shp.shp')
 
     # use the keys as geometries and make a multipoint geometry but make points with them
     # with open('data/dup_points.geojson', 'w') as f:
