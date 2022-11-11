@@ -3,11 +3,12 @@ import time
 import numpy as np
 import shapely
 from fastapi import FastAPI
-from pydantic import BaseModel
+from pandas.core.common import flatten
 from shapely.geometry import Point
 from tqdm import tqdm
 
 from build_structures import create_road_ball_tree, create_zone_ball_tree
+from util import PointRequestBody, LineRequestBody
 
 USE_CACHE = True
 DEBUG = True
@@ -20,17 +21,9 @@ road_tree, road_ids, road_df = None, None, None
 zones_tree, zones_ids, zones_df = None, None, None
 
 
-class LineRequestBody(BaseModel):
-    line: str
-
-
-class PointRequestBody(BaseModel):
-    point: str
-
 
 def find_containing_zone(point, df):
-    """This is CRAZY slow, and should not be used across an entire dataset"""
-    print('BRUTE FORCE')
+    """This is slow, and should not be used across an entire dataset, unless absolutely necessary"""
     zone = df[df['geometry'].contains(point)].index.values
     return zone[0] if len(zone) > 0 else None
 
@@ -60,7 +53,11 @@ def query_tree(tree, ids, points, k=1, timer_desc=None, return_distance=False):
         indices = tree.query(points_radians, k=k, return_distance=False)
 
     # get the ids of the nearest neighbors
-    nested_ids = [ids[index] for sub in indices for index in sub]
+    nested_ids = []
+    for index_arr in indices:
+        nested_ids.append([ids[index] for index in index_arr])
+
+    # nested_ids = [ids[index] for sub in indices for index in sub]
 
     print(f'{timer_desc}: {time.process_time() - start} seconds')
 
@@ -83,6 +80,7 @@ def find_matching_zones(points, tree, ids, df):
     # query the tree
     nested_zones = query_tree(tree, ids, points, k=first_search_size,
                               timer_desc='first zone query for all points' if DEBUG else None)
+    print(nested_zones)
     # mash em together and find the ids
     unique_zones = list({zone for sub in nested_zones for zone in sub})
 
@@ -143,13 +141,14 @@ async def match_line(body: LineRequestBody):
     points = [Point(c) for c in line.coords]
 
     roadsegids = query_tree(road_tree, road_ids, points, k=1, timer_desc='road query for all points' if DEBUG else None)
+    roadsegids = list(flatten(roadsegids))
 
     zones = find_matching_zones(points, zones_tree, zones_ids, zones_df)
 
     return {
         'streets': {
             'roadsegid': roadsegids,
-            'geometry': road_df[road_df['ROADSEGID'].isin(roadsegids)][['ROADSEGID', 'geometry']].to_json()
+            'geometry': road_df[road_df.index.isin(roadsegids)]['geometry'].to_json()
         },
         'zone': {
             'zoneid': zones,
@@ -164,13 +163,13 @@ async def match_line(body: PointRequestBody):
 
     point = shapely.wkt.loads(body.point)
 
-    roadsegid = query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)[0]
+    roadsegid = list(flatten(query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[0]
 
     zones = find_matching_zones([point], zones_tree, zones_ids, zones_df)
     return {
         'streets': {
             'roadsegid': roadsegid,
-            'geometry': road_df[road_df['ROADSEGID'] == roadsegid][['ROADSEGID', 'geometry']].to_json()
+            'geometry': road_df[road_df.index == roadsegid]['geometry'].to_json()
         },
         'zone': {
             'zoneid': zones[0] if len(zones) else None,

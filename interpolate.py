@@ -18,7 +18,6 @@ TARGET_PROJ_IS_FT_US = True
 INTERPOLATION_DISTANCE_METERS = 5  # the distance between interpolated points in meters
 LINE_PAD_DISTANCE_METERS = 0.1  # how much to pad the line by to make sure we don't get duplicate points at intersections
 MIN_LINE_LENGTH_METERS = 1  # meters
-USE_CACHE = True
 USE_SUBSET = False
 WRITE_DEBUG_SHAPEFILES = True
 xmin = -117.186
@@ -63,19 +62,9 @@ def split_line(row):
 
 
 # Load the data, convert to target projection for shapely, then interpolate points
-def process_roads(df):
-    if os.path.exists('/cache/final.pickle') and USE_CACHE:
+def process_roads(df, use_cache=True):
+    if os.path.exists('/cache/final.pickle') and use_cache:
         return pd.read_pickle('/cache/final.pickle')
-
-    if os.path.exists('/cache/road.pickle'):
-        print('loading roads from pickle')
-        df = pd.read_pickle('/cache/road.pickle')
-    else:
-        start = time.process_time()
-        df = df.to_crs('EPSG:4326')
-        df = df.set_index('ROADSEGID')
-        df.to_pickle('/cache/road.pickle')
-        print('loaded shapefile in {} seconds'.format(time.process_time() - start))
 
     if USE_SUBSET:
         df = df.cx[xmin:xmax, ymin:ymax]
@@ -93,7 +82,7 @@ def process_roads(df):
     print('removed {} roads that were too short'.format(orig_len - df.shape[0]))
 
     # make points every INTERPOLATION_DISTANCE meters evenly along the line
-    if os.path.exists(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle') and USE_CACHE:
+    if os.path.exists(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle') and use_cache:
         print(f'loading split EPSG:{TARGET_PROJ_EPSG_CODE} roads from pickle')
         df = pd.read_pickle(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle')
     else:
