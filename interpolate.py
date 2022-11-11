@@ -3,6 +3,7 @@ import os.path
 import time
 
 import shapely
+import geopandas as gpd
 from shapely.geometry import LineString, Point
 from tqdm import tqdm
 import numpy as np
@@ -17,9 +18,9 @@ TARGET_PROJ_IS_FT_US = True
 INTERPOLATION_DISTANCE_METERS = 5  # the distance between interpolated points in meters
 LINE_PAD_DISTANCE_METERS = 0.1  # how much to pad the line by to make sure we don't get duplicate points at intersections
 MIN_LINE_LENGTH_METERS = 1  # meters
-USE_CACHE = False
+USE_CACHE = True
 USE_SUBSET = False
-WRITE_DEBUG_SHAPEFILES = False
+WRITE_DEBUG_SHAPEFILES = True
 xmin = -117.186
 ymin = 32.692
 xmax = -117.129
@@ -63,19 +64,19 @@ def split_line(row):
 
 # Load the data, convert to target projection for shapely, then interpolate points
 def load_roads_from_file():
-    if os.path.exists('cache/final.pickle') and USE_CACHE:
-        return pd.read_pickle('cache/final.pickle')
+    if os.path.exists('/cache/final.pickle') and USE_CACHE:
+        return pd.read_pickle('/cache/final.pickle')
 
-    if os.path.exists('cache/ref.pickle'):
+    if os.path.exists('/cache/ref.pickle'):
         print('loading roads from pickle')
-        df = pd.read_pickle('cache/ref.pickle')
+        df = pd.read_pickle('/cache/ref.pickle')
     else:
         start = time.process_time()
-        df = geopandas.read_file('data/ref/ref.shp')
+        df = geopandas.read_file('/data/ref/ref.shp')
         df = df.to_crs('EPSG:4326')
         df = df.set_index('ROADSEGID')
-        df.to_pickle('cache/ref.pickle')
-        print('loaded geojson in {} seconds'.format(time.process_time() - start))
+        df.to_pickle('/cache/ref.pickle')
+        print('loaded shapefile in {} seconds'.format(time.process_time() - start))
 
     if USE_SUBSET:
         df = df.cx[xmin:xmax, ymin:ymax]
@@ -84,13 +85,13 @@ def load_roads_from_file():
     total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
     print('total points: {}'.format(total_points_count))
 
-    if os.path.exists(f'cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle') and USE_CACHE:
+    if os.path.exists(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle') and USE_CACHE:
         print(f'loading EPSG:{TARGET_PROJ_EPSG_CODE} roads from pickle')
-        df = pd.read_pickle(f'cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle')
+        df = pd.read_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle')
     else:
         start = time.process_time()
         df = df.to_crs(TARGET_PROJ_EPSG_CODE)
-        df.to_pickle(f'cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle')
+        df.to_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}.pickle')
         print('converted to EPSG:{} in {} seconds'.format(TARGET_PROJ_EPSG_CODE, time.process_time() - start))
 
     # remove roads that are too short and show how many were removed
@@ -99,13 +100,13 @@ def load_roads_from_file():
     print('removed {} roads that were too short'.format(orig_len - df.shape[0]))
 
     # make points every INTERPOLATION_DISTANCE meters evenly along the line
-    if os.path.exists(f'cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle') and USE_CACHE:
+    if os.path.exists(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle') and USE_CACHE:
         print(f'loading split EPSG:{TARGET_PROJ_EPSG_CODE} roads from pickle')
-        df = pd.read_pickle(f'cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle')
+        df = pd.read_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle')
     else:
         start = time.process_time()
         df['geometry'] = df.progress_apply(lambda row: split_line(row), axis=1)
-        df.to_pickle(f'cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle')
+        df.to_pickle(f'/cache/ref_{TARGET_PROJ_EPSG_CODE}_split.pickle')
         print('interpolated points in {} seconds'.format(time.process_time() - start))
 
     total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
@@ -116,7 +117,7 @@ def load_roads_from_file():
 
     # write to shapefile
     if WRITE_DEBUG_SHAPEFILES:
-        df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('data/interpolated/shp.shp')
+        df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('/data/interpolated/shp.shp')
 
     points_dict = {}
     for index, row in tqdm(df.iterrows(), total=df.shape[0]):
@@ -126,6 +127,11 @@ def load_roads_from_file():
             if point not in points_dict:
                 points_dict[point] = []
             points_dict[point].append(index)
+
+    if WRITE_DEBUG_SHAPEFILES:
+        all_points = gpd.GeoDataFrame({'geometry': [Point(x) for x in points_dict.keys()]})
+        all_points.to_file('/data/interpolated_points/shp.shp')
+
     # get just points that have multiple ids
     dup_points_dict = {k: v for k, v in points_dict.items() if len(v) > 1}
     print('found {} duplicate points'.format(len(dup_points_dict)))
@@ -141,13 +147,13 @@ def load_roads_from_file():
     #         df.at[index, 'geometry'] = LineString(coords)
     # write to shapefile
     if WRITE_DEBUG_SHAPEFILES:
-        df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('data/split_no_dup/shp.shp')
+        df.drop(columns=['POSTDATE', 'ADDSEGDT']).to_file('/data/split_no_dup/shp.shp')
 
     # use the keys as geometries and make a multipoint geometry but make points with them
     # with open('data/dup_points.geojson', 'w') as f:
     #     f.write(geopandas.GeoSeries(map(lambda p: Point(p), dup_points_dict.keys())).to_json())
 
-    df.to_pickle('cache/final.pickle')
+    df.to_pickle('/cache/final.pickle')
     return df
     # data = json.load(f)
     # with open('cache/ref.pickle', 'wb') as f:

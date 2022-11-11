@@ -2,3 +2,7 @@ numpy
 sklearn
 tqdm
 geopandas
+requests
+scikit-learn
+fastapi
+uvicorn[standard]

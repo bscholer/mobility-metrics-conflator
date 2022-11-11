@@ -1,0 +1,10 @@
+{
+  "roads_reference_url": "https://opendata.arcgis.com/api/v3/datasets/022406df18654f638b9c9abd4914b92d_0/downloads/data?format=shp&spatialRefId=3857&where=1%3D1",
+  "roads_reference_expiration_days": 7,
+  "projection_epsg": "2230",
+  "projection_unit_to_meter_conversion_factor": 0.3048006096012192,
+  "segment_interpolation_distance": 5,
+  "segment_padding_distance": 0.1,
+  "segment_minimum_length": 1,
+  "ball_tree_leaf_size": 40
+}
