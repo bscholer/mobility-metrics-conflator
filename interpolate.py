@@ -18,6 +18,16 @@ TARGET_PROJ_IS_FT_US = True
 INTERPOLATION_DISTANCE_METERS = 5  # the distance between interpolated points in meters
 LINE_PAD_DISTANCE_METERS = 0.1  # how much to pad the line by to make sure we don't get duplicate points at intersections
 MIN_LINE_LENGTH_METERS = 1  # meters
+EXCLUDED_FUNCTIONAL_CLASS = [
+    '1', # freeway to freeway ramps
+    'E', # expressway
+    'F', # freeway
+    'P', # paper road
+    'R', # ramp
+    'T', # transitway
+    'U' # unpaved road
+]
+
 USE_SUBSET = False
 WRITE_DEBUG_SHAPEFILES = True
 xmin = -117.186
@@ -74,6 +84,11 @@ def process_roads(df, use_cache=True):
     print('total points: {}'.format(total_points_count))
 
     df = df.to_crs(TARGET_PROJ_EPSG_CODE)
+
+    # exclude roads with certain functional classes
+    df = df[~df['FUNCLASS'].isin(EXCLUDED_FUNCTIONAL_CLASS)]
+    if WRITE_DEBUG_SHAPEFILES:
+        df.to_file('/cache/filtered_funclass.shp')
 
     # remove roads that are too short and show how many were removed
     orig_len = df.shape[0]

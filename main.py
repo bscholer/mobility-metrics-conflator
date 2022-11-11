@@ -80,7 +80,7 @@ def find_matching_zones(points, tree, ids, df):
     # query the tree
     nested_zones = query_tree(tree, ids, points, k=first_search_size,
                               timer_desc='first zone query for all points' if DEBUG else None)
-    print(nested_zones)
+
     # mash em together and find the ids
     unique_zones = list({zone for sub in nested_zones for zone in sub})
 
@@ -92,7 +92,8 @@ def find_matching_zones(points, tree, ids, df):
         point = points[i]
         zone = find_containing_zone(point, matching_zones_df)
         if zone is None:
-            print('no zone found in initial query, expanding search')
+            if DEBUG:
+                print('no zone found in initial query, expanding search')
             # if no zone is found, expand the search radius
             closest_zones = \
             query_tree(tree, ids, points, k=second_search_size, timer_desc='second query for zones' if DEBUG else None)[

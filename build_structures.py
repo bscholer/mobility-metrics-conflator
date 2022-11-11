@@ -93,7 +93,7 @@ def create_road_ball_tree():
             tree, ids = pickle.load(f)
         return tree, ids, df
     else:
-        roads = process_roads(df)
+        roads = process_roads(df, USE_CACHE)
         points_dict = create_points_dict(roads)
         points = list(points_dict.keys())
         points_radians = [[np.deg2rad(point[0]), np.deg2rad(point[1])] for point in points]
