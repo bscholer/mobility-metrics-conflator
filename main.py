@@ -8,10 +8,18 @@ from shapely.geometry import Point
 from tqdm import tqdm
 
 from build_structures import create_road_ball_tree, create_zone_ball_tree
-from util import PointRequestBody, LineRequestBody
+from trip_volume import calculate_trip_volume
+from util import PointRequestBody, LineRequestBody, TripVolumeRequestBody
 
 USE_CACHE = True
 DEBUG = True
+STAT_TESTING_ONLY = False
+# CATEGORY_COLUMNS = ['provider_name', 'vehicle_type', 'propulsion_types']
+# MATCH_COLUMNS = ['zones', 'streets', 'bins']
+# TIME_GROUPS = ['D', 'H', '30min', '15min'] # using pandas time series offset notation https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
+MATCH_COLUMNS = ['streets']
+CATEGORY_COLUMNS = ['provider_name']
+TIME_GROUPS = ['D']
 
 EARTH_RADIUS = 6371008  # meters
 
@@ -19,7 +27,6 @@ tqdm.pandas()
 
 road_tree, road_ids, road_df = None, None, None
 zones_tree, zones_ids, zones_df = None, None, None
-
 
 
 def find_containing_zone(point, df):
@@ -96,8 +103,9 @@ def find_matching_zones(points, tree, ids, df):
                 print('no zone found in initial query, expanding search')
             # if no zone is found, expand the search radius
             closest_zones = \
-            query_tree(tree, ids, points, k=second_search_size, timer_desc='second query for zones' if DEBUG else None)[
-                0]
+                query_tree(tree, ids, points, k=second_search_size,
+                           timer_desc='second query for zones' if DEBUG else None)[
+                    0]
 
             zone = find_containing_zone(point, df[df.index.isin(closest_zones)])
 
@@ -115,16 +123,17 @@ def find_matching_zones(points, tree, ids, df):
     if DEBUG:
         print('matched {} points to {} zone in {} seconds'.format(len(points), len(zones), time.process_time() - start))
 
-    zones = [int(zone) for zone in set(zones)]
+    zones = [int(zone) for zone in zones]
     return zones
 
 
-# This will almost always just be *loading* the data, not doing the processing.
-# Processing should be done before the server is started.
-if road_tree is None or road_ids is None or road_df is None:
-    road_tree, road_ids, road_df = create_road_ball_tree()
-if zones_tree is None or zones_ids is None or zones_df is None:
-    zones_tree, zones_ids, zones_df = create_zone_ball_tree()
+if not STAT_TESTING_ONLY:
+    # This will almost always just be *loading* the data, not doing the processing.
+    # Processing is done before the server is started.
+    if road_tree is None or road_ids is None or road_df is None:
+        road_tree, road_ids, road_df = create_road_ball_tree()
+    if zones_tree is None or zones_ids is None or zones_df is None:
+        zones_tree, zones_ids, zones_df = create_zone_ball_tree()
 
 app = FastAPI()
 
@@ -149,10 +158,14 @@ async def match_line(body: LineRequestBody):
     return {
         'streets': {
             'roadsegid': roadsegids,
+            'pickup': roadsegids[0],
+            'dropoff': roadsegids[-1],
             'geometry': road_df[road_df.index.isin(roadsegids)]['geometry'].to_json()
         },
         'zone': {
             'zoneid': zones,
+            'pickup': zones[0],
+            'dropoff': zones[-1]
             # 'geometry': zones_df[zones_df['id'].isin(zone)][['id', 'geometry']].to_json()
         }
     }
@@ -164,7 +177,9 @@ async def match_line(body: PointRequestBody):
 
     point = shapely.wkt.loads(body.point)
 
-    roadsegid = list(flatten(query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[0]
+    roadsegid = \
+    list(flatten(query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[
+        0]
 
     zones = find_matching_zones([point], zones_tree, zones_ids, zones_df)
     return {
@@ -177,3 +192,8 @@ async def match_line(body: PointRequestBody):
             # 'geometry': zones_df[zones_df['id'] == zone]['geometry'].to_json()
         }
     }
+
+
+@app.post("/trip_volume/")
+async def trip_volume(body: TripVolumeRequestBody):
+    return calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_COLUMNS, TIME_GROUPS)

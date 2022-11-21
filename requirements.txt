@@ -6,3 +6,4 @@ requests
 scikit-learn
 fastapi
 uvicorn[standard]
+geojson-pydantic
