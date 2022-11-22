@@ -9,7 +9,7 @@ from tqdm import tqdm
 from util import print_full, MdsTripWithMatches
 
 
-def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[MdsTripWithMatches], privacy_minimum: int, category_columns: list[str], match_columns: list[str], time_groups: list[str]):
+def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[MdsTripWithMatches], category_columns: list[str], match_columns: list[str], time_groups: list[str]):
     """Calculate the pickups for a list of trips"""
     # load the trips into a dataframe
     # print(trips[0])
@@ -25,10 +25,11 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
     results = []
     for col in match_columns:
         match_df = df.copy()
-        match_df[col] = match_df['matches'].apply(lambda x: list(set(x[col])))
+        match_df[mode] = match_df['matches'].apply(lambda x: x[mode])
+        match_df[col] = match_df[mode].apply(lambda x: x[col])
         match_df.drop(columns=['matches'], inplace=True)
 
-        match_df = match_df.explode(col)
+        # match_df = match_df.explode(col)
         # for each category column make a distinct list of the values in that column
         category_dict = {}
         for category_col in category_columns:
@@ -61,17 +62,18 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
                     # add to results
                     for match_value, count in group.iterrows():
                         # check if count is greater than privacy minimum
-                        if count['trip_id'] > privacy_minimum:
-                            result = category_combination.copy()
-                            result[col] = match_value
-                            result['count'] = count[category_columns[0]]
-                            result['time_group'] = time_group
-                            result['time_group_value'] = group_name
-                            results.append(result)
+                        # if count['trip_id'] > privacy_minimum:
+                        result = category_combination.copy()
+                        result[col] = match_value
+                        result['count'] = count[category_columns[0]]
+                        result['time_group'] = time_group
+                        result['time_group_value'] = group_name
+                        results.append(result)
 
     # save results to csv file formatted well
     results_df = pd.DataFrame(results)
     results_df.to_csv('/cache/trip_volume.csv', index=False)
+    return results_df
 
 
 

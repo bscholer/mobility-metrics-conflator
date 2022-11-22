@@ -66,8 +66,8 @@ def process_roads(df, use_cache=True):
         df = df.cx[xmin:xmax, ymin:ymax]
         print('subset to {} roads'.format(len(df)))
 
-    total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
-    print('total points: {}'.format(total_points_count))
+    # total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
+    # print('total points: {}'.format(total_points_count))
 
     df = df.to_crs(TARGET_PROJ_EPSG_CODE)
 
@@ -91,8 +91,8 @@ def process_roads(df, use_cache=True):
         df['geometry'] = df.progress_apply(lambda row: split_line(row), axis=1)
         df.to_pickle(f'/cache/road_{TARGET_PROJ_EPSG_CODE}_split.pickle')
 
-    total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
-    print('total points: {}'.format(total_points_count))
+    # total_points_count = df['geometry'].apply(lambda x: len(x.coords)).sum()
+    # print('total points: {}'.format(total_points_count))
 
     # reproject to wgs84 for geojson
     df = df.to_crs('EPSG:4326')

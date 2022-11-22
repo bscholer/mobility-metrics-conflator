@@ -71,6 +71,7 @@ def calculate_trip_volume(trips: list[MdsTripWithMatches], privacy_minimum: int,
         # save results to csv file formatted well
         results_df = pd.DataFrame(results)
         results_df.to_csv(f'/cache/trip_volume_{match_type}.csv', index=False)
+        return results_df
 
 
 

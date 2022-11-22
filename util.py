@@ -68,6 +68,6 @@ class MdsTripWithMatches(BaseModel):
         return self.dict()
 
 
-class TripVolumeRequestBody(BaseModel):
+class TripBasedRequestBody(BaseModel):
     trips: list[MdsTripWithMatches]
-    privacy_minimum: int
+    privacy_minimum: int = 0

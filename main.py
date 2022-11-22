@@ -8,8 +8,9 @@ from shapely.geometry import Point
 from tqdm import tqdm
 
 from build_structures import create_road_ball_tree, create_zone_ball_tree
+from pickup_dropoff import calculate_pickup_dropoff
 from trip_volume import calculate_trip_volume
-from util import PointRequestBody, LineRequestBody, TripVolumeRequestBody
+from util import PointRequestBody, LineRequestBody, TripBasedRequestBody
 
 USE_CACHE = True
 DEBUG = True
@@ -195,5 +196,22 @@ async def match_line(body: PointRequestBody):
 
 
 @app.post("/trip_volume/")
-async def trip_volume(body: TripVolumeRequestBody):
-    return calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_COLUMNS, TIME_GROUPS)
+async def trip_volume(body: TripBasedRequestBody):
+    df = calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_COLUMNS, TIME_GROUPS)
+    df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+    return df.to_json()
+
+
+@app.post("/pickup/")
+async def pickup(body: TripBasedRequestBody):
+    match_cols = ['zone', 'street', 'bin']
+    df = calculate_pickup_dropoff(mode='pickup', trips=body.trips, category_columns=CATEGORY_COLUMNS, match_columns=match_cols, time_groups=TIME_GROUPS)
+    df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+    return df.to_json()
+
+@app.post("/dropoff/")
+async def pickup(body: TripBasedRequestBody):
+    match_cols = ['zone', 'street', 'bin']
+    df = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS, match_columns=match_cols, time_groups=TIME_GROUPS)
+    df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+    return df.to_json()
