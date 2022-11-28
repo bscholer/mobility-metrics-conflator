@@ -8,13 +8,14 @@ from shapely.geometry import Point
 from tqdm import tqdm
 
 from build_structures import create_road_ball_tree, create_zone_ball_tree
+from flow import calculate_flow
 from pickup_dropoff import calculate_pickup_dropoff
 from trip_volume import calculate_trip_volume
 from util import PointRequestBody, LineRequestBody, TripBasedRequestBody
 
 USE_CACHE = True
-DEBUG = True
-STAT_TESTING_ONLY = True
+DEBUG = False
+STAT_TESTING_ONLY = False
 CATEGORY_COLUMNS = ['provider_name', 'vehicle_type', 'propulsion_types']
 MATCH_TYPES = ['zones', 'streets', 'bins']
 TIME_GROUPS = ['D', 'H', '30min', '15min'] # using pandas time series offset notation https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
@@ -67,7 +68,8 @@ def query_tree(tree, ids, points, k=1, timer_desc=None, return_distance=False):
 
     # nested_ids = [ids[index] for sub in indices for index in sub]
 
-    print(f'{timer_desc}: {time.process_time() - start} seconds')
+    if DEBUG and timer_desc:
+        print(f'{timer_desc}: {time.process_time() - start} seconds')
 
     if return_distance:
         return distances, nested_ids
@@ -231,6 +233,19 @@ async def pickup(body: TripBasedRequestBody):
     match_types = ['zone', 'street', 'bin']
     dfs = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS,
                                    match_types=match_types, time_groups=TIME_GROUPS)
+    ret = {}
+    for i in range(len(dfs)):
+        df = dfs[i]
+        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+        ret[match_types[i]] = df.to_json(orient='records')
+    return ret
+
+
+@app.post("/flow/")
+async def flow(body: TripBasedRequestBody):
+    match_types = ['zone', 'street', 'bin']
+    dfs = calculate_flow(trips=body.trips, privacy_minimum=body.privacy_minimum, category_columns=CATEGORY_COLUMNS, match_types=match_types,
+                         time_groups=TIME_GROUPS)
     ret = {}
     for i in range(len(dfs)):
         df = dfs[i]

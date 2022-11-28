@@ -39,6 +39,12 @@ class PickupDropoffStat(BaseModel):
     bin: str
 
 
+class FlowStat(BaseModel):
+    street: str
+    zone: str
+    bin: str
+
+
 # TODO name this better
 class StatMatch(BaseModel):
     """ the matches object that gets sent with requests to stat functions. The matching functions do not return all these fields. """
@@ -47,6 +53,7 @@ class StatMatch(BaseModel):
     bins: list[str]
     pickup: PickupDropoffStat
     dropoff: PickupDropoffStat
+    flow: FlowStat
 
     def to_dict(self):
         return self.dict()
