@@ -14,13 +14,13 @@ from util import PointRequestBody, LineRequestBody, TripBasedRequestBody
 
 USE_CACHE = True
 DEBUG = True
-STAT_TESTING_ONLY = False
-# CATEGORY_COLUMNS = ['provider_name', 'vehicle_type', 'propulsion_types']
-# MATCH_COLUMNS = ['zones', 'streets', 'bins']
-# TIME_GROUPS = ['D', 'H', '30min', '15min'] # using pandas time series offset notation https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
-MATCH_COLUMNS = ['streets']
-CATEGORY_COLUMNS = ['provider_name']
-TIME_GROUPS = ['D']
+STAT_TESTING_ONLY = True
+CATEGORY_COLUMNS = ['provider_name', 'vehicle_type', 'propulsion_types']
+MATCH_TYPES = ['zones', 'streets', 'bins']
+TIME_GROUPS = ['D', 'H', '30min', '15min'] # using pandas time series offset notation https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
+# MATCH_TYPES = ['streets']
+# CATEGORY_COLUMNS = ['provider_name']
+# TIME_GROUPS = ['D']
 
 EARTH_RADIUS = 6371008  # meters
 
@@ -135,6 +135,12 @@ if not STAT_TESTING_ONLY:
         road_tree, road_ids, road_df = create_road_ball_tree()
     if zones_tree is None or zones_ids is None or zones_df is None:
         zones_tree, zones_ids, zones_df = create_zone_ball_tree()
+    # road_df.to_crs(epsg=4326) .to_csv('/cache/road_df.csv')
+    # zones_df.to_crs(epsg=4326).to_csv('/cache/zones_df.csv')
+    # turn road_df into a dml statement
+    # dml = 'INSERT INTO road_df (road_seg_id, geom) VALUES '
+    # for index, row in road_df.iterrows():
+    #     dml += f"('{index}', 'ST_ {row['geometry'].wkt}'),"
 
 app = FastAPI()
 
@@ -179,8 +185,9 @@ async def match_line(body: PointRequestBody):
     point = shapely.wkt.loads(body.point)
 
     roadsegid = \
-    list(flatten(query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[
-        0]
+        list(flatten(
+            query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[
+            0]
 
     zones = find_matching_zones([point], zones_tree, zones_ids, zones_df)
     return {
@@ -197,21 +204,36 @@ async def match_line(body: PointRequestBody):
 
 @app.post("/trip_volume/")
 async def trip_volume(body: TripBasedRequestBody):
-    df = calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_COLUMNS, TIME_GROUPS)
-    df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-    return df.to_json()
+    dfs = calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_TYPES, TIME_GROUPS)
+    ret = {}
+    for i in range(len(dfs)):
+        df = dfs[i]
+        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+        ret[MATCH_TYPES[i]] = df.to_json(orient='records')
+    return ret
 
 
 @app.post("/pickup/")
 async def pickup(body: TripBasedRequestBody):
-    match_cols = ['zone', 'street', 'bin']
-    df = calculate_pickup_dropoff(mode='pickup', trips=body.trips, category_columns=CATEGORY_COLUMNS, match_columns=match_cols, time_groups=TIME_GROUPS)
-    df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-    return df.to_json()
+    match_types = ['zone', 'street', 'bin']
+    dfs = calculate_pickup_dropoff(mode='pickup', trips=body.trips, category_columns=CATEGORY_COLUMNS,
+                                   match_types=match_types, time_groups=TIME_GROUPS)
+    ret = {}
+    for i in range(len(dfs)):
+        df = dfs[i]
+        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+        ret[match_types[i]] = df.to_json(orient='records')
+    return ret
+
 
 @app.post("/dropoff/")
 async def pickup(body: TripBasedRequestBody):
-    match_cols = ['zone', 'street', 'bin']
-    df = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS, match_columns=match_cols, time_groups=TIME_GROUPS)
-    df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-    return df.to_json()
+    match_types = ['zone', 'street', 'bin']
+    dfs = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS,
+                                   match_types=match_types, time_groups=TIME_GROUPS)
+    ret = {}
+    for i in range(len(dfs)):
+        df = dfs[i]
+        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
+        ret[match_types[i]] = df.to_json(orient='records')
+    return ret

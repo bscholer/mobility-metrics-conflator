@@ -9,8 +9,9 @@ from tqdm import tqdm
 from util import print_full, MdsTripWithMatches
 
 
-def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[MdsTripWithMatches], category_columns: list[str], match_columns: list[str], time_groups: list[str]):
-    """Calculate the pickups for a list of trips"""
+def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[MdsTripWithMatches], category_columns: list[str], match_types: list[str], time_groups: list[str]):
+    to_return = []
+    """Calculate the pickups or dropoffs for a list of trips"""
     # load the trips into a dataframe
     # print(trips[0])
     df = pd.DataFrame([trip.to_dict() for trip in trips])
@@ -22,12 +23,13 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
     # make propulsion_types a comma separated string
     df['propulsion_types'] = df['propulsion_types'].apply(lambda x: ','.join(sorted(x)))
     # make columns for each match category
-    results = []
-    for col in match_columns:
+    for match_type in match_types:
+        results = []
         match_df = df.copy()
         match_df[mode] = match_df['matches'].apply(lambda x: x[mode])
-        match_df[col] = match_df[mode].apply(lambda x: x[col])
-        match_df.drop(columns=['matches'], inplace=True)
+        match_df[match_type] = match_df[mode].apply(lambda x: x[match_type])
+        print(match_df.columns)
+        match_df.drop(columns=['matches', mode], inplace=True)
 
         # match_df = match_df.explode(col)
         # for each category column make a distinct list of the values in that column
@@ -57,45 +59,22 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
                 match_df_filtered_grouped = match_df_filtered.groupby(pd.Grouper(freq=time_group))
                 for group_name, group in match_df_filtered_grouped:
                     # group by the match column and count the number of rows in each group
-                    group = group.groupby(col).count()
+                    group = group.groupby(match_type).count()
 
                     # add to results
                     for match_value, count in group.iterrows():
                         # check if count is greater than privacy minimum
                         # if count['trip_id'] > privacy_minimum:
                         result = category_combination.copy()
-                        result[col] = match_value
+                        result[match_type] = match_value
                         result['count'] = count[category_columns[0]]
                         result['time_group'] = time_group
                         result['time_group_value'] = group_name
                         results.append(result)
 
-    # save results to csv file formatted well
-    results_df = pd.DataFrame(results)
-    results_df.to_csv('/cache/trip_volume.csv', index=False)
-    return results_df
+        # save results to csv file formatted well
+        results_df = pd.DataFrame(results)
+        results_df.to_csv(f'/cache/{mode}_{match_type}.csv', index=False)
+        to_return.append(results_df)
 
-
-
-        # make a new df for every combination of category values
-        # dfs = []
-        # for category_col, category_values in category_dict.items():
-        #     for category_value in category_values:
-        #         dfs.append(match_df[match_df[category_col] == category_value])
-
-    # divide the df into the smallest chunks, and then run the aggregation on each chunk
-
-
-
-    # drop the matches column
-    # df = df.drop(columns=['matches'])
-
-    # make copie
-
-
-
-
-    print_full(df.head())
-
-
-    print('calculating trip volume')
+    return to_return
