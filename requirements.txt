@@ -8,3 +8,4 @@ fastapi
 uvicorn[standard]
 geojson-pydantic
 h3
+azure-storage-file-datalake

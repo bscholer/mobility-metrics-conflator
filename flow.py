@@ -10,7 +10,7 @@ from util import print_full, MdsTripWithMatches
 
 
 def calculate_flow(trips: list[MdsTripWithMatches], privacy_minimum: int, category_columns: list[str], match_types: list[str], time_groups: list[str]):
-    to_return = []
+    to_return = {}
     """Calculate the flow stats for a list of trips"""
     # load the trips into a dataframe
     # print(trips[0])
@@ -26,7 +26,10 @@ def calculate_flow(trips: list[MdsTripWithMatches], privacy_minimum: int, catego
     for match_type in match_types:
         results = []
         match_df = df.copy()
-        match_df[match_type] = match_df['matches'].apply(lambda x: x['flow'][match_type])
+        # match_df[match_type] = match_df['matches'].apply(lambda x: x['flow'][match_type])
+        match_df[match_type] = match_df['matches'].apply(lambda x: x['flow'][match_type] if match_type in x['flow'] else None)
+        # drop nones
+        match_df.dropna(subset=[match_type], inplace=True)
         match_df.drop(columns=['matches'], inplace=True)
 
         match_df = match_df.explode(match_type)
@@ -62,7 +65,7 @@ def calculate_flow(trips: list[MdsTripWithMatches], privacy_minimum: int, catego
                     # add to results
                     for match_value, count in group.iterrows():
                         # check if count is greater than privacy minimum
-                        if count['trip_id'] > privacy_minimum:
+                        if count['trip_id'] >= privacy_minimum:
                             result = category_combination.copy()
                             result[f'{match_type}_orig'] = match_value.split('>')[0]
                             result[f'{match_type}_dest'] = match_value.split('>')[1]
@@ -77,6 +80,6 @@ def calculate_flow(trips: list[MdsTripWithMatches], privacy_minimum: int, catego
         # save results to csv file formatted well
         results_df = pd.DataFrame(results)
         results_df.to_csv(f'/cache/flow_{match_type}.csv', index=False)
-        to_return.append(results_df)
+        to_return[match_type] = results_df
 
     return to_return

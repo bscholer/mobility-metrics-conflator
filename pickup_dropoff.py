@@ -10,7 +10,7 @@ from util import print_full, MdsTripWithMatches
 
 
 def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[MdsTripWithMatches], category_columns: list[str], match_types: list[str], time_groups: list[str]):
-    to_return = []
+    to_return = {}
     """Calculate the pickups or dropoffs for a list of trips"""
     # load the trips into a dataframe
     # print(trips[0])
@@ -27,7 +27,10 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
         results = []
         match_df = df.copy()
         match_df[mode] = match_df['matches'].apply(lambda x: x[mode])
-        match_df[match_type] = match_df[mode].apply(lambda x: x[match_type])
+        # match_df[match_type] = match_df[mode].apply(lambda x: x[match_type])
+        match_df[match_type] = match_df[mode].apply(lambda x: x[match_type] if match_type in x else None)
+        # drop nones
+        match_df.dropna(subset=[match_type], inplace=True)
         print(match_df.columns)
         match_df.drop(columns=['matches', mode], inplace=True)
 
@@ -75,6 +78,6 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
         # save results to csv file formatted well
         results_df = pd.DataFrame(results)
         results_df.to_csv(f'/cache/{mode}_{match_type}.csv', index=False)
-        to_return.append(results_df)
+        to_return[match_type] = results_df
 
     return to_return

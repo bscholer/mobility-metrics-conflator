@@ -10,7 +10,7 @@ from util import print_full, MdsTripWithMatches
 
 
 def calculate_trip_volume(trips: list[MdsTripWithMatches], privacy_minimum: int, category_columns: list[str], match_types: list[str], time_groups: list[str]):
-    to_return = []
+    to_return = {}
     """Calculate the trip volume for a list of trips"""
     # load the trips into a dataframe
     # print(trips[0])
@@ -62,7 +62,7 @@ def calculate_trip_volume(trips: list[MdsTripWithMatches], privacy_minimum: int,
                     # add to results
                     for match_value, count in group.iterrows():
                         # check if count is greater than privacy minimum
-                        if count['trip_id'] > privacy_minimum:
+                        if count['trip_id'] >= privacy_minimum:
                             result = category_combination.copy()
                             result[match_type] = match_value
                             result['count'] = count[category_columns[0]]
@@ -75,7 +75,7 @@ def calculate_trip_volume(trips: list[MdsTripWithMatches], privacy_minimum: int,
 
         # save results to csv file formatted well
         results_df = pd.DataFrame(results)
-        results_df.to_csv(f'/cache/trip_volume_{match_type}.csv', index=False)
-        to_return.append(results_df)
+        # results_df.to_csv(f'/cache/trip_volume_{match_type}.csv', index=False)
+        to_return[match_type] = results_df
 
     return to_return

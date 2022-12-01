@@ -86,6 +86,28 @@ def create_zone_ball_tree():
         return tree, ids, df
 
 
+def create_jurisdiction_ball_tree():
+    df = load_shapefile('jurisdiction', index_field='OBJECTID')
+    if os.path.exists('/cache/jurisdiction_ball_tree.pickle') and USE_CACHE:
+        with open('/cache/jurisdiction_ball_tree.pickle', 'rb') as f:
+            tree, ids = pickle.load(f)
+        return tree, ids, df
+    else:
+        # find center of zone
+        df['center'] = df['geometry'].progress_apply(lambda geom: Point(geom.centroid))
+        df = df.drop(columns=['geometry'])
+        df.set_geometry(df['center'], inplace=True)
+
+        # convert to radians
+        df['center'] = df['center'].progress_apply(lambda point: [np.deg2rad(point.x), np.deg2rad(point.y)])
+        # create ball tree
+        ids = df.index.tolist()
+        tree = BallTree([list(point) for point in df['center']], metric='haversine', leaf_size=2)
+        with open('/cache/jurisdiction_ball_tree.pickle', 'wb') as f:
+            pickle.dump((tree, ids), f)
+        return tree, ids, df
+
+
 def create_road_ball_tree():
     df = load_shapefile('road', index_field='ROADSEGID')
     if os.path.exists('/cache/road_ball_tree.pickle') and USE_CACHE:
@@ -110,6 +132,14 @@ def main():
         create_zone_ball_tree()
     else:
         print("zone data structures already built")
+
+    if not (os.path.exists('/cache/jurisdiction.pickle') and os.path.exists(
+            '/cache/jurisdiction_ball_tree.pickle') and USE_CACHE):
+        print("building jurisdiction data structures")
+        create_jurisdiction_ball_tree()
+    else:
+        print("jurisdiction data structures already built")
+
     if not (os.path.exists('/cache/road.pickle') and os.path.exists('/cache/road_ball_tree.pickle') and USE_CACHE):
         print("building road data structures")
         create_road_ball_tree()

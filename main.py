@@ -1,25 +1,31 @@
+import os
+import pathlib
 import time
 
 import numpy as np
+import pandas as pd
 import shapely
 from fastapi import FastAPI
 from pandas.core.common import flatten
 from shapely.geometry import Point
 from tqdm import tqdm
 
-from build_structures import create_road_ball_tree, create_zone_ball_tree
+from availability import calculate_availability
+from build_structures import create_road_ball_tree, create_zone_ball_tree, create_jurisdiction_ball_tree
+from data_lake import DataLake
 from flow import calculate_flow
 from pickup_dropoff import calculate_pickup_dropoff
 from trip_volume import calculate_trip_volume
-from util import PointRequestBody, LineRequestBody, TripBasedRequestBody
+from util import PointRequestBody, LineRequestBody, TripBasedRequestBody, StatusChangeBasedRequestBody
 
 USE_CACHE = True
 DEBUG = False
 STAT_TESTING_ONLY = False
 CATEGORY_COLUMNS = ['provider_name', 'vehicle_type', 'propulsion_types']
-MATCH_TYPES = ['zones', 'streets', 'bins']
-TIME_GROUPS = ['D', 'H', '30min', '15min'] # using pandas time series offset notation https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
-# MATCH_TYPES = ['streets']
+MATCH_TYPES = ['zone', 'street', 'bin', 'jurisdiction']
+# using pandas time series offset notation https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
+TIME_GROUPS = ['D', 'H', '30min', '15min']
+# MATCH_TYPES = ['street']
 # CATEGORY_COLUMNS = ['provider_name']
 # TIME_GROUPS = ['D']
 
@@ -29,6 +35,7 @@ tqdm.pandas()
 
 road_tree, road_ids, road_df = None, None, None
 zones_tree, zones_ids, zones_df = None, None, None
+jurisdiction_tree, jurisdiction_ids, jurisdiction_df = None, None, None
 
 
 def find_containing_zone(point, df):
@@ -84,7 +91,8 @@ def find_matching_zones(points, tree, ids, df):
     Shapely contains is very slow, so this is still slow, but much faster than the brute force method.
     """
     first_search_size = 5
-    second_search_size = 100
+    # second_search_size = 100
+    second_search_size = df.shape[0] if df.shape[0] < 100 else 100
 
     start = time.process_time()
     # query the tree
@@ -130,6 +138,14 @@ def find_matching_zones(points, tree, ids, df):
     return zones
 
 
+def save_cache_csv(df: pd.DataFrame, report_date: str, stat_type: str, match_type: str):
+    print('saving cache csv')
+    filepath = f'/cache/{report_date.replace("-", "/")}/{stat_type}_{match_type}.csv'
+    pathlib.Path(filepath).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(filepath)
+    return filepath
+
+
 if not STAT_TESTING_ONLY:
     # This will almost always just be *loading* the data, not doing the processing.
     # Processing is done before the server is started.
@@ -137,12 +153,23 @@ if not STAT_TESTING_ONLY:
         road_tree, road_ids, road_df = create_road_ball_tree()
     if zones_tree is None or zones_ids is None or zones_df is None:
         zones_tree, zones_ids, zones_df = create_zone_ball_tree()
+    if jurisdiction_tree is None or jurisdiction_ids is None or jurisdiction_df is None:
+        jurisdiction_tree, jurisdiction_ids, jurisdiction_df = create_jurisdiction_ball_tree()
     # road_df.to_crs(epsg=4326) .to_csv('/cache/road_df.csv')
     # zones_df.to_crs(epsg=4326).to_csv('/cache/zones_df.csv')
     # turn road_df into a dml statement
     # dml = 'INSERT INTO road_df (road_seg_id, geom) VALUES '
     # for index, row in road_df.iterrows():
     #     dml += f"('{index}', 'ST_ {row['geometry'].wkt}'),"
+
+# initialize the data lake
+print('initializing data lake')
+data_lake = DataLake(account_name=os.getenv('AZURE_STORAGE_ACCOUNT_NAME'),
+                     account_key=os.getenv('AZURE_STORAGE_ACCOUNT_KEY'))
+
+print('initialized!')
+
+# data_lake.list_directory_contents('mdc-data-lake-file-system', '2022/')
 
 app = FastAPI()
 
@@ -164,8 +191,10 @@ async def match_line(body: LineRequestBody):
 
     zones = find_matching_zones(points, zones_tree, zones_ids, zones_df)
 
+    jurisdictions = find_matching_zones(points, jurisdiction_tree, jurisdiction_ids, jurisdiction_df)
+
     return {
-        'streets': {
+        'street': {
             'roadsegid': roadsegids,
             'pickup': roadsegids[0],
             'dropoff': roadsegids[-1],
@@ -175,14 +204,18 @@ async def match_line(body: LineRequestBody):
             'zoneid': zones,
             'pickup': zones[0],
             'dropoff': zones[-1]
-            # 'geometry': zones_df[zones_df['id'].isin(zone)][['id', 'geometry']].to_json()
+        },
+        'jurisdiction': {
+            'jurisdictionid': jurisdictions,
+            'pickup': jurisdictions[0],
+            'dropoff': jurisdictions[-1]
         }
     }
 
 
 @app.post("/match_point/")
 async def match_line(body: PointRequestBody):
-    global road_tree, road_ids, road_df, zones_tree, zones_ids, zones_df
+    global road_tree, road_ids, road_df, zones_tree, zones_ids, zones_df, jurisdiction_tree, jurisdiction_ids, jurisdiction_df
 
     point = shapely.wkt.loads(body.point)
 
@@ -192,63 +225,73 @@ async def match_line(body: PointRequestBody):
             0]
 
     zones = find_matching_zones([point], zones_tree, zones_ids, zones_df)
+    jurisdictions = find_matching_zones([point], jurisdiction_tree, jurisdiction_ids, jurisdiction_df)
+
     return {
-        'streets': {
+        'street': {
             'roadsegid': roadsegid,
             'geometry': road_df[road_df.index == roadsegid]['geometry'].to_json()
         },
         'zone': {
             'zoneid': zones[0] if len(zones) else None,
             # 'geometry': zones_df[zones_df['id'] == zone]['geometry'].to_json()
+        },
+        'jurisdiction': {
+            'jurisdictionid': jurisdictions[0] if len(jurisdictions) else None,
         }
     }
 
 
 @app.post("/trip_volume/")
 async def trip_volume(body: TripBasedRequestBody):
-    dfs = calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_TYPES, TIME_GROUPS)
-    ret = {}
-    for i in range(len(dfs)):
-        df = dfs[i]
-        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-        ret[MATCH_TYPES[i]] = df.to_json(orient='records')
-    return ret
+    stats = calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_TYPES, TIME_GROUPS)
+    for match_type in stats:
+        filepath = save_cache_csv(stats[match_type], body.report_date, 'trip_volume', match_type)
+        data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
+                              f'trip_volume_{match_type}.csv', filepath)
 
 
 @app.post("/pickup/")
 async def pickup(body: TripBasedRequestBody):
-    match_types = ['zone', 'street', 'bin']
-    dfs = calculate_pickup_dropoff(mode='pickup', trips=body.trips, category_columns=CATEGORY_COLUMNS,
-                                   match_types=match_types, time_groups=TIME_GROUPS)
-    ret = {}
-    for i in range(len(dfs)):
-        df = dfs[i]
-        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-        ret[match_types[i]] = df.to_json(orient='records')
-    return ret
+    match_types = ['zone', 'street', 'bin', 'jurisdiction']
+    stats = calculate_pickup_dropoff(mode='pickup', trips=body.trips, category_columns=CATEGORY_COLUMNS,
+                                     match_types=match_types, time_groups=TIME_GROUPS)
+    for match_type in stats:
+        filepath = save_cache_csv(stats[match_type], body.report_date, 'pickup', match_type)
+        data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
+                              f'pickup_{match_type}.csv', filepath)
 
 
 @app.post("/dropoff/")
 async def pickup(body: TripBasedRequestBody):
-    match_types = ['zone', 'street', 'bin']
-    dfs = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS,
-                                   match_types=match_types, time_groups=TIME_GROUPS)
-    ret = {}
-    for i in range(len(dfs)):
-        df = dfs[i]
-        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-        ret[match_types[i]] = df.to_json(orient='records')
-    return ret
+    match_types = ['zone', 'street', 'bin', 'jurisdiction']
+    stats = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS,
+                                     match_types=match_types, time_groups=TIME_GROUPS)
+    for match_type in stats:
+        filepath = save_cache_csv(stats[match_type], body.report_date, 'dropoff', match_type)
+        data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
+                              f'dropoff_{match_type}.csv', filepath)
 
 
 @app.post("/flow/")
 async def flow(body: TripBasedRequestBody):
-    match_types = ['zone', 'street', 'bin']
-    dfs = calculate_flow(trips=body.trips, privacy_minimum=body.privacy_minimum, category_columns=CATEGORY_COLUMNS, match_types=match_types,
-                         time_groups=TIME_GROUPS)
-    ret = {}
-    for i in range(len(dfs)):
-        df = dfs[i]
-        df = df.astype({col: 'int32' for col in df.select_dtypes('int64').columns})
-        ret[match_types[i]] = df.to_json(orient='records')
-    return ret
+    match_types = ['zone', 'street', 'bin', 'jurisdiction']
+    stats = calculate_flow(trips=body.trips, privacy_minimum=body.privacy_minimum, category_columns=CATEGORY_COLUMNS,
+                           match_types=match_types,
+                           time_groups=TIME_GROUPS)
+    for match_type in stats:
+        filepath = save_cache_csv(stats[match_type], body.report_date, 'flow', match_type)
+        data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
+                              f'flow_{match_type}.csv', filepath)
+
+
+@app.post("/availability/")
+async def availability(body: StatusChangeBasedRequestBody):
+    match_types = ['zone', 'street', 'bin', 'jurisdiction']
+    stats = calculate_availability(status_changes=body.status_changes, category_columns=CATEGORY_COLUMNS,
+                                   match_types=match_types,
+                                   time_groups=TIME_GROUPS)
+    for match_type in stats:
+        filepath = save_cache_csv(stats[match_type], body.report_date, 'availability', match_type)
+        data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
+                              f'availability_{match_type}.csv', filepath)

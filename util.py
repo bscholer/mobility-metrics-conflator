@@ -1,4 +1,6 @@
 import collections
+from typing import Literal
+
 from pydantic import BaseModel
 from geojson_pydantic.features import FeatureCollection
 import pandas as pd
@@ -36,24 +38,37 @@ class PointRequestBody(BaseModel):
 class PickupDropoffStat(BaseModel):
     street: int
     zone: int
+    jurisdiction: int
     bin: str
 
 
 class FlowStat(BaseModel):
     street: str
     zone: str
+    jurisdiction: str
     bin: str
 
 
 # TODO name this better
 class StatMatch(BaseModel):
     """ the matches object that gets sent with requests to stat functions. The matching functions do not return all these fields. """
-    zones: list[int]
-    streets: list[int]
-    bins: list[str]
+    zone: list[int]
+    jurisdiction: list[int]
+    street: list[int]
+    bin: list[str]
     pickup: PickupDropoffStat
     dropoff: PickupDropoffStat
     flow: FlowStat
+
+    def to_dict(self):
+        return self.dict()
+
+
+class StatusChangeMatch(BaseModel):
+    zone: int
+    jurisdiction: int
+    street: int
+    bin: str
 
     def to_dict(self):
         return self.dict()
@@ -75,6 +90,26 @@ class MdsTripWithMatches(BaseModel):
         return self.dict()
 
 
+class MdsStatusChangeWithMatches(BaseModel):
+    provider_name: str
+    vehicle_id: str
+    vehicle_type: str
+    propulsion_types: list[str]
+    vehicle_state: Literal['removed', 'available', 'non_operational', 'reserved', 'on_trip', 'elsewhere', 'unknown']
+    event_time: int
+    matches: StatusChangeMatch
+
+    def to_dict(self):
+        return self.dict()
+
+
 class TripBasedRequestBody(BaseModel):
+    report_date: str # YYYY-MM-DD
     trips: list[MdsTripWithMatches]
+    privacy_minimum: int = 0
+
+
+class StatusChangeBasedRequestBody(BaseModel):
+    report_date: str # YYYY-MM-DD
+    status_changes: list[MdsStatusChangeWithMatches]
     privacy_minimum: int = 0
