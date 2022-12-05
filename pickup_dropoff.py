@@ -77,7 +77,7 @@ def calculate_pickup_dropoff(mode: Literal['pickup', 'dropoff'], trips: list[Mds
 
         # save results to csv file formatted well
         results_df = pd.DataFrame(results)
-        results_df.to_csv(f'/cache/{mode}_{match_type}.csv', index=False)
+        # results_df.to_csv(f'/cache/{mode}_{match_type}.csv', index=False)
         to_return[match_type] = results_df
 
     return to_return

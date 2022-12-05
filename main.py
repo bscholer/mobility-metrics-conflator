@@ -249,6 +249,8 @@ async def trip_volume(body: TripBasedRequestBody):
         filepath = save_cache_csv(stats[match_type], body.report_date, 'trip_volume', match_type)
         data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
                               f'trip_volume_{match_type}.csv', filepath)
+        # remove the file
+        os.remove(filepath)
 
 
 @app.post("/pickup/")
@@ -260,6 +262,8 @@ async def pickup(body: TripBasedRequestBody):
         filepath = save_cache_csv(stats[match_type], body.report_date, 'pickup', match_type)
         data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
                               f'pickup_{match_type}.csv', filepath)
+        # remove the file
+        os.remove(filepath)
 
 
 @app.post("/dropoff/")
@@ -271,6 +275,8 @@ async def pickup(body: TripBasedRequestBody):
         filepath = save_cache_csv(stats[match_type], body.report_date, 'dropoff', match_type)
         data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
                               f'dropoff_{match_type}.csv', filepath)
+        # remove the file
+        os.remove(filepath)
 
 
 @app.post("/flow/")
@@ -283,6 +289,8 @@ async def flow(body: TripBasedRequestBody):
         filepath = save_cache_csv(stats[match_type], body.report_date, 'flow', match_type)
         data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
                               f'flow_{match_type}.csv', filepath)
+        # remove the file
+        os.remove(filepath)
 
 
 @app.post("/availability/")
@@ -295,3 +303,5 @@ async def availability(body: StatusChangeBasedRequestBody):
         filepath = save_cache_csv(stats[match_type], body.report_date, 'availability', match_type)
         data_lake.upload_file('mdc-data-lake-file-system', body.report_date.replace('-', '/'),
                               f'availability_{match_type}.csv', filepath)
+        # remove the file
+        os.remove(filepath)

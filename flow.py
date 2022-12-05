@@ -79,7 +79,7 @@ def calculate_flow(trips: list[MdsTripWithMatches], privacy_minimum: int, catego
 
         # save results to csv file formatted well
         results_df = pd.DataFrame(results)
-        results_df.to_csv(f'/cache/flow_{match_type}.csv', index=False)
+        # results_df.to_csv(f'/cache/flow_{match_type}.csv', index=False)
         to_return[match_type] = results_df
 
     return to_return
