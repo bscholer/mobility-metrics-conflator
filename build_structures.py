@@ -65,7 +65,7 @@ def create_points_dict(roads_df):
 
 
 def create_zone_ball_tree():
-    df = load_shapefile('zone', index_field='MGRA')
+    df = load_shapefile('zone_simplified', index_field='MGRA')
     if os.path.exists('/cache/zone_ball_tree.pickle') and USE_CACHE:
         with open('/cache/zone_ball_tree.pickle', 'rb') as f:
             tree, ids = pickle.load(f)
@@ -87,7 +87,7 @@ def create_zone_ball_tree():
 
 
 def create_jurisdiction_ball_tree():
-    df = load_shapefile('jurisdiction', index_field='OBJECTID')
+    df = load_shapefile('jurisdiction_simplified', index_field='OBJECTID')
     if os.path.exists('/cache/jurisdiction_ball_tree.pickle') and USE_CACHE:
         with open('/cache/jurisdiction_ball_tree.pickle', 'rb') as f:
             tree, ids = pickle.load(f)
@@ -127,6 +127,9 @@ def create_road_ball_tree():
 
 
 def main():
+    if not os.path.exists('/cache'):
+        os.mkdir('/cache')
+
     if not (os.path.exists('/cache/zone.pickle') and os.path.exists('/cache/zone_ball_tree.pickle') and USE_CACHE):
         print("building zone data structures")
         create_zone_ball_tree()

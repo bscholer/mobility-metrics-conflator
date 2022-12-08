@@ -18,6 +18,8 @@ from pickup_dropoff import calculate_pickup_dropoff
 from trip_volume import calculate_trip_volume
 from util import PointRequestBody, LineRequestBody, TripBasedRequestBody, StatusChangeBasedRequestBody
 
+app = FastAPI()
+
 USE_CACHE = True
 DEBUG = False
 STAT_TESTING_ONLY = False
@@ -33,9 +35,11 @@ EARTH_RADIUS = 6371008  # meters
 
 tqdm.pandas()
 
+is_initialized = False
 road_tree, road_ids, road_df = None, None, None
 zones_tree, zones_ids, zones_df = None, None, None
 jurisdiction_tree, jurisdiction_ids, jurisdiction_df = None, None, None
+data_lake = None
 
 
 def find_containing_zone(point, df):
@@ -146,104 +150,127 @@ def save_cache_csv(df: pd.DataFrame, report_date: str, stat_type: str, match_typ
     return filepath
 
 
-if not STAT_TESTING_ONLY:
-    # This will almost always just be *loading* the data, not doing the processing.
-    # Processing is done before the server is started.
-    if road_tree is None or road_ids is None or road_df is None:
-        road_tree, road_ids, road_df = create_road_ball_tree()
-    if zones_tree is None or zones_ids is None or zones_df is None:
-        zones_tree, zones_ids, zones_df = create_zone_ball_tree()
-    if jurisdiction_tree is None or jurisdiction_ids is None or jurisdiction_df is None:
-        jurisdiction_tree, jurisdiction_ids, jurisdiction_df = create_jurisdiction_ball_tree()
-    # road_df.to_crs(epsg=4326) .to_csv('/cache/road_df.csv')
-    # zones_df.to_crs(epsg=4326).to_csv('/cache/zones_df.csv')
-    # turn road_df into a dml statement
-    # dml = 'INSERT INTO road_df (road_seg_id, geom) VALUES '
-    # for index, row in road_df.iterrows():
-    #     dml += f"('{index}', 'ST_ {row['geometry'].wkt}'),"
+print('********** MOBILITY METRICS 🛴 CONFLATOR **********')
 
-# initialize the data lake
-print('initializing data lake')
-data_lake = DataLake(account_name=os.getenv('AZURE_STORAGE_ACCOUNT_NAME'),
-                     account_key=os.getenv('AZURE_STORAGE_ACCOUNT_KEY'))
 
-print('initialized!')
+def init():
+    global is_initialized, road_tree, road_ids, road_df, zones_tree, zones_ids, zones_df, jurisdiction_tree, jurisdiction_ids, jurisdiction_df, data_lake
+    if is_initialized:
+        return
 
-# data_lake.list_directory_contents('mdc-data-lake-file-system', '2022/')
+    if not STAT_TESTING_ONLY:
+        # This will almost always just be *loading* the data, not doing the processing.
+        # Processing is done before the server is started.
+        if road_tree is None or road_ids is None or road_df is None:
+            road_tree, road_ids, road_df = create_road_ball_tree()
+        if zones_tree is None or zones_ids is None or zones_df is None:
+            zones_tree, zones_ids, zones_df = create_zone_ball_tree()
+        if jurisdiction_tree is None or jurisdiction_ids is None or jurisdiction_df is None:
+            jurisdiction_tree, jurisdiction_ids, jurisdiction_df = create_jurisdiction_ball_tree()
 
-app = FastAPI()
+    # initialize the data lake
+    print('initializing data lake')
+    data_lake = DataLake(account_name=os.getenv('AZURE_STORAGE_ACCOUNT_NAME'),
+                         account_key=os.getenv('AZURE_STORAGE_ACCOUNT_KEY'))
+    print('initialized!')
+    is_initialized = True
+    # return road_tree, road_ids, road_df, zones_tree, zones_ids, zones_df, jurisdiction_tree, jurisdiction_ids, jurisdiction_df, data_lake
 
 
 @app.get("/")
 def read_root():
+    #init()
     return {"Hello": "World"}
 
 
 @app.post("/match_line/")
 async def match_line(body: LineRequestBody):
-    global road_tree, road_ids, road_df, zones_tree, zones_ids, zones_df
+    init()
 
-    line = shapely.wkt.loads(body.line)
-    points = [Point(c) for c in line.coords]
+    def match_single_line(wkt_line):
+        line = shapely.wkt.loads(wkt_line)
+        points = [Point(c) for c in line.coords]
 
-    roadsegids = query_tree(road_tree, road_ids, points, k=1, timer_desc='road query for all points' if DEBUG else None)
-    roadsegids = list(flatten(roadsegids))
+        roadsegids = query_tree(road_tree, road_ids, points, k=1,
+                                timer_desc='road query for all points' if DEBUG else None)
+        roadsegids = list(flatten(roadsegids))
 
-    zones = find_matching_zones(points, zones_tree, zones_ids, zones_df)
+        zones = find_matching_zones(points, zones_tree, zones_ids, zones_df)
 
-    jurisdictions = find_matching_zones(points, jurisdiction_tree, jurisdiction_ids, jurisdiction_df)
+        jurisdictions = find_matching_zones(points, jurisdiction_tree, jurisdiction_ids, jurisdiction_df)
 
-    return {
-        'street': {
-            'roadsegid': roadsegids,
-            'pickup': roadsegids[0],
-            'dropoff': roadsegids[-1],
-            'geometry': road_df[road_df.index.isin(roadsegids)]['geometry'].to_json()
-        },
-        'zone': {
-            'zoneid': zones,
-            'pickup': zones[0],
-            'dropoff': zones[-1]
-        },
-        'jurisdiction': {
-            'jurisdictionid': jurisdictions,
-            'pickup': jurisdictions[0],
-            'dropoff': jurisdictions[-1]
+        return {
+            'street': {
+                'roadsegid': roadsegids,
+                'pickup': roadsegids[0],
+                'dropoff': roadsegids[-1],
+                'geometry': road_df[road_df.index.isin(roadsegids)]['geometry'].to_json()
+            },
+            'zone': {
+                'zoneid': zones,
+                'pickup': zones[0],
+                'dropoff': zones[-1]
+            },
+            'jurisdiction': {
+                'jurisdictionid': jurisdictions,
+                'pickup': jurisdictions[0],
+                'dropoff': jurisdictions[-1]
+            }
         }
-    }
+
+    if body.lines is not None and body.line is None:
+        ret = {}
+        for trip_id, wkt in body.lines.items():
+            ret[trip_id] = match_single_line(wkt)
+        return ret
+
+    elif body.line is not None and body.lines is None:
+        return match_single_line(body.line)
 
 
 @app.post("/match_point/")
-async def match_line(body: PointRequestBody):
-    global road_tree, road_ids, road_df, zones_tree, zones_ids, zones_df, jurisdiction_tree, jurisdiction_ids, jurisdiction_df
+async def match_point(body: PointRequestBody):
+    init()
 
-    point = shapely.wkt.loads(body.point)
+    def match_single_point(wkt_point):
+        point = shapely.wkt.loads(wkt_point)
 
-    roadsegid = \
-        list(flatten(
-            query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[
-            0]
+        roadsegid = \
+            list(flatten(
+                query_tree(road_tree, road_ids, [point], k=1, timer_desc='road query for point' if DEBUG else None)))[
+                0]
 
-    zones = find_matching_zones([point], zones_tree, zones_ids, zones_df)
-    jurisdictions = find_matching_zones([point], jurisdiction_tree, jurisdiction_ids, jurisdiction_df)
+        zones = find_matching_zones([point], zones_tree, zones_ids, zones_df)
+        jurisdictions = find_matching_zones([point], jurisdiction_tree, jurisdiction_ids, jurisdiction_df)
 
-    return {
-        'street': {
-            'roadsegid': roadsegid,
-            'geometry': road_df[road_df.index == roadsegid]['geometry'].to_json()
-        },
-        'zone': {
-            'zoneid': zones[0] if len(zones) else None,
-            # 'geometry': zones_df[zones_df['id'] == zone]['geometry'].to_json()
-        },
-        'jurisdiction': {
-            'jurisdictionid': jurisdictions[0] if len(jurisdictions) else None,
+        return {
+            'street': {
+                'roadsegid': roadsegid,
+                'geometry': road_df[road_df.index == roadsegid]['geometry'].to_json()
+            },
+            'zone': {
+                'zoneid': zones[0] if len(zones) else None,
+                # 'geometry': zones_df[zones_df['id'] == zone]['geometry'].to_json()
+            },
+            'jurisdiction': {
+                'jurisdictionid': jurisdictions[0] if len(jurisdictions) else None,
+            }
         }
-    }
+
+    if body.points is not None and body.point is None:
+        ret = {}
+        for trip_id, wkt in body.points.items():
+            ret[trip_id] = match_single_point(wkt)
+        return ret
+
+    elif body.point is not None and body.points is None:
+        return match_single_point(body.point)
 
 
 @app.post("/trip_volume/")
 async def trip_volume(body: TripBasedRequestBody):
+    init()
+
     stats = calculate_trip_volume(body.trips, body.privacy_minimum, CATEGORY_COLUMNS, MATCH_TYPES, TIME_GROUPS)
     for match_type in stats:
         filepath = save_cache_csv(stats[match_type], body.report_date, 'trip_volume', match_type)
@@ -255,6 +282,8 @@ async def trip_volume(body: TripBasedRequestBody):
 
 @app.post("/pickup/")
 async def pickup(body: TripBasedRequestBody):
+    init()
+
     match_types = ['zone', 'street', 'bin', 'jurisdiction']
     stats = calculate_pickup_dropoff(mode='pickup', trips=body.trips, category_columns=CATEGORY_COLUMNS,
                                      match_types=match_types, time_groups=TIME_GROUPS)
@@ -268,6 +297,8 @@ async def pickup(body: TripBasedRequestBody):
 
 @app.post("/dropoff/")
 async def pickup(body: TripBasedRequestBody):
+    init()
+
     match_types = ['zone', 'street', 'bin', 'jurisdiction']
     stats = calculate_pickup_dropoff(mode='dropoff', trips=body.trips, category_columns=CATEGORY_COLUMNS,
                                      match_types=match_types, time_groups=TIME_GROUPS)
@@ -281,6 +312,8 @@ async def pickup(body: TripBasedRequestBody):
 
 @app.post("/flow/")
 async def flow(body: TripBasedRequestBody):
+    init()
+
     match_types = ['zone', 'street', 'bin', 'jurisdiction']
     stats = calculate_flow(trips=body.trips, privacy_minimum=body.privacy_minimum, category_columns=CATEGORY_COLUMNS,
                            match_types=match_types,
@@ -295,6 +328,8 @@ async def flow(body: TripBasedRequestBody):
 
 @app.post("/availability/")
 async def availability(body: StatusChangeBasedRequestBody):
+    init()
+
     match_types = ['zone', 'street', 'bin', 'jurisdiction']
     stats = calculate_availability(status_changes=body.status_changes, category_columns=CATEGORY_COLUMNS,
                                    match_types=match_types,

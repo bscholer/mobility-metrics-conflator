@@ -1,5 +1,5 @@
 import collections
-from typing import Literal
+from typing import Literal, Dict, Optional
 
 from pydantic import BaseModel
 from geojson_pydantic.features import FeatureCollection
@@ -28,11 +28,13 @@ def print_full(x):
 
 
 class LineRequestBody(BaseModel):
-    line: str
+    line: Optional[str]
+    lines: Optional[Dict[str, str]]
 
 
 class PointRequestBody(BaseModel):
-    point: str
+    point: Optional[str]
+    points: Optional[Dict[str, str]]
 
 
 class PickupDropoffStat(BaseModel):
@@ -104,12 +106,12 @@ class MdsStatusChangeWithMatches(BaseModel):
 
 
 class TripBasedRequestBody(BaseModel):
-    report_date: str # YYYY-MM-DD
+    report_date: str  # YYYY-MM-DD
     trips: list[MdsTripWithMatches]
     privacy_minimum: int = 0
 
 
 class StatusChangeBasedRequestBody(BaseModel):
-    report_date: str # YYYY-MM-DD
+    report_date: str  # YYYY-MM-DD
     status_changes: list[MdsStatusChangeWithMatches]
     privacy_minimum: int = 0
